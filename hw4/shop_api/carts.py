@@ -18,19 +18,19 @@ def _get_cart_or_404(cart_id: int) -> store.CartRecord:
 
 
 @router.post("", status_code=HTTPStatus.CREATED)
-async def post_cart(response: Response) -> CartIdResponse:
+def post_cart(response: Response) -> CartIdResponse:
     cart = store.add_cart()
     response.headers["location"] = f"/cart/{cart.id}"
     return CartIdResponse(id=cart.id)
 
 
 @router.get("/{cart_id}")
-async def get_cart(cart_id: int) -> CartResponse:
+def get_cart(cart_id: int) -> CartResponse:
     return CartResponse.from_record(_get_cart_or_404(cart_id))
 
 
 @router.get("")
-async def get_cart_list(
+def get_cart_list(
     offset: Annotated[NonNegativeInt, Query()] = 0,
     limit: Annotated[PositiveInt, Query()] = 10,
     min_price: Annotated[NonNegativeFloat | None, Query()] = None,
@@ -51,11 +51,11 @@ async def get_cart_list(
 
 
 @router.post("/{cart_id}/add/{item_id}")
-async def add_item_to_cart(cart_id: int, item_id: int) -> CartResponse:
-    cart = _get_cart_or_404(cart_id)
+def add_item_to_cart(cart_id: int, item_id: int) -> CartResponse:
+    _get_cart_or_404(cart_id)
     item = store.get_item(item_id)
     if item is None or item.deleted:
         raise HTTPException(HTTPStatus.NOT_FOUND, f"Item {item_id} not found")
 
-    cart.items[item_id] = cart.items.get(item_id, 0) + 1
-    return CartResponse.from_record(cart)
+    store.add_item_to_cart(cart_id, item_id)
+    return CartResponse.from_record(_get_cart_or_404(cart_id))

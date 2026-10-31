@@ -1,45 +1,22 @@
-# HW4 — Shop API на Postgres + уровни изоляции транзакций
+# HW5 — тесты Shop API (ДЗ-2 на Postgres из ДЗ-4) + CI
 
-Shop API из ДЗ-2 теперь хранит данные в PostgreSQL, а не в памяти процесса.
+## Что сделано
+1. **Покрытие 100 %** (порог 95 % зашит в `pytest.ini` через `--cov-fail-under=95`: ниже — тесты падают).
+   - `tests/test_homework2.py` — тесты ДЗ-2 из репозитория курса, без изменений;
+   - `tests/test_extra.py` — ветки ошибок (404 / 304), lifespan, повторное добавление товара в корзину (`quantity: 2`).
+2. **CI** — `.github/workflows/hw5-tests.yml`: GitHub Actions на Python 3.13 и 3.14, Postgres 16 как `services` (с healthcheck), запуск при изменениях в `hw5/`.
 
-## Как устроено
-- `docker-compose.yml` — `postgres:16` (том `pgdata`, healthcheck `pg_isready`) + `shop-api`; сервис стартует только после того, как база `healthy`, адрес базы — в `DATABASE_URL`
-- `shop_api/db.py` — engine (пул соединений), фабрика сессий, `Base`
-- `shop_api/models.py` — таблицы `items`, `carts`, `cart_items` (many-to-many через третью таблицу, составной PK, внешние ключи)
-- `shop_api/store.py` — Data Mapper: SQLAlchemy-модели отдельно от доменных `ItemRecord` / `CartRecord`; каждая функция — одна транзакция
-- `shop_api/items.py`, `carts.py` — ручки те же, что в ДЗ-2; фильтр и пагинация товаров — в SQL
-- `isolation/` — скрипты с аномалиями транзакций
+## Как устроены тесты
+- Тесты ходят в отдельную базу `shop_test`, а не в рабочую `shop`: `tests/conftest.py` задаёт `DATABASE_URL` до импорта приложения.
+- Предохранитель: если имя базы не оканчивается на `_test`, прогон падает сразу и ничего не удаляет.
+- Перед прогоном таблицы пересоздаются (`drop_all` + `create_all`) — каждый запуск с чистой базы.
 
-Решения:
-- синхронный SQLAlchemy + psycopg, поэтому хендлеры `def`, а не `async def` — FastAPI запускает их в пуле потоков и не блокирует event loop
-- добавление в корзину — один атомарный запрос `INSERT … ON CONFLICT DO UPDATE SET quantity = quantity + 1`, без lost update
-- таблицы создаются `create_all` при старте приложения (миграции в задании не требовались)
-
-## Запуск
-```bash
-cd hw4
-docker compose up --build
-```
-Shop API: http://127.0.0.1:8080/docs. Данные переживают `docker compose restart` и `down` / `up` (без `-v`).
-
-## Уровни изоляции
-База из compose должна быть запущена (порт 5432 проброшен на хост):
-```bash
-cd hw4
-pip install -r requirements.txt
-python -m isolation.dirty_read
-python -m isolation.non_repeatable_read
-python -m isolation.phantom_read
-```
-В каждом скрипте два соединения A и B, шаги идут строго по очереди; меняется уровень изоляции A. Скрипт печатает, что видит A, и вердикт.
-
-| Пункт задания | Результат в Postgres 16 |
-| --- | --- |
-| dirty read при Read Uncommitted | не воспроизводится: Postgres принимает уровень (`SHOW transaction_isolation` → `read uncommitted`), но работает как Read Committed |
-| нет dirty read при Read Committed | ✅ A видит 1500, а не незакоммиченную 1 |
-| non-repeatable read при Read Committed | ❗ 300 → 350 в одной транзакции |
-| нет non-repeatable read при Repeatable Read | ✅ 300 → 300 |
-| phantom read при Repeatable Read | не воспроизводится: Repeatable Read в Postgres — снимок данных, строже стандарта; фантом показан на Read Committed: ❗ 2 → 3 |
-| нет phantom read при Serializable | ✅ 2 → 2 (и на Repeatable Read тоже) |
-
-Цена — `float`, как в контрактах ДЗ-2; для денег в реальном сервисе нужен `Numeric`.
+## Запуск локально
+~~~bash
+cd hw5
+docker compose up -d --wait postgres
+docker compose exec postgres createdb -U shop shop_test
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+~~~
